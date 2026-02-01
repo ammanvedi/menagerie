@@ -1,0 +1,362 @@
+# Menagerie Configuration
+# Defines available models, integrations, and resource templates
+
+# =============================================================================
+# AI Models
+# =============================================================================
+models:
+  - name: "Claude Opus 4.5"
+    slug: "claude-opus-4-5"
+    requiredIntegrations:
+      - "anthropic"
+    configJsonSchema:
+      type: "object"
+      properties:
+        temperature:
+          type: "number"
+          minimum: 0
+          maximum: 1
+          default: 0.7
+        maxTokens:
+          type: "integer"
+          minimum: 1
+          maximum: 128000
+          default: 16384
+    setupScript: |
+      # Claude Opus 4.5 setup
+      echo "Setting up Claude Opus 4.5 model..."
+      export ANTHROPIC_MODEL="claude-opus-4-5-20250514"
+
+# =============================================================================
+# Integrations
+# =============================================================================
+integrations:
+  - name: "GitHub"
+    slug: "github"
+    description: "Connect to GitHub for repository access and Git operations"
+    configJsonSchema:
+      type: "object"
+      properties:
+        accessToken:
+          type: "string"
+          description: "GitHub personal access token with repo scope"
+          envVarName: "GITHUB_TOKEN"
+      required:
+        - "accessToken"
+
+  - name: "Anthropic"
+    slug: "anthropic"
+    description: "Connect to Anthropic API for Claude models"
+    configJsonSchema:
+      type: "object"
+      properties:
+        apiKey:
+          type: "string"
+          description: "Anthropic API key"
+          envVarName: "ANTHROPIC_API_KEY"
+      required:
+        - "apiKey"
+
+  - name: "OpenAI"
+    slug: "openai"
+    description: "Connect to OpenAI API for GPT models"
+    configJsonSchema:
+      type: "object"
+      properties:
+        apiKey:
+          type: "string"
+          description: "OpenAI API key"
+          envVarName: "OPENAI_API_KEY"
+      required:
+        - "apiKey"
+
+  - name: "Vercel"
+    slug: "vercel"
+    description: "Vercel platform access for sandbox creation and deployment"
+    configJsonSchema:
+      type: "object"
+      properties:
+        token:
+          type: "string"
+          description: "Vercel access token for API authentication"
+          envVarName: "VERCEL_TOKEN"
+        teamId:
+          type: "string"
+          description: "Vercel team ID (find in team settings)"
+          envVarName: "VERCEL_TEAM_ID"
+        projectId:
+          type: "string"
+          description: "Vercel project ID for sandbox instances"
+          envVarName: "VERCEL_PROJECT_ID"
+      required:
+        - "token"
+        - "teamId"
+        - "projectId"
+
+  - name: "Figma"
+    slug: "figma"
+    description: "Connect to Figma API for design integration"
+    configJsonSchema:
+      type: "object"
+      properties:
+        apiKey:
+          type: "string"
+          description: "Figma API access token"
+          envVarName: "FIGMA_API_KEY"
+      required:
+        - "apiKey"
+
+  - name: "E2B"
+    slug: "e2b"
+    description: "E2B sandbox platform for agent execution"
+    configJsonSchema:
+      type: "object"
+      properties:
+        apiKey:
+          type: "string"
+          description: "E2B API key"
+          envVarName: "E2B_API_KEY"
+      required:
+        - "apiKey"
+
+# =============================================================================
+# Resource Templates
+# =============================================================================
+resourceTemplates:
+  - name: "GitHub Repository"
+    slug: "github-repo"
+    description: "Clone and work with a GitHub repository"
+    requiredIntegrations:
+      - "github"
+    configJsonSchema:
+      type: "object"
+      properties:
+        owner:
+          type: "string"
+          description: "Repository owner (user or organization)"
+          envVarName: "GITHUB_REPO_OWNER"
+        repo:
+          type: "string"
+          description: "Repository name"
+          envVarName: "GITHUB_REPO_NAME"
+        branch:
+          type: "string"
+          description: "Branch to checkout"
+          default: "main"
+          envVarName: "GITHUB_REPO_BRANCH"
+      required:
+        - "owner"
+        - "repo"
+    setupScript: |
+      # GitHub Repository setup
+      echo "Cloning repository ${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}..."
+      git clone "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}.git"
+
+
+agentTypes:
+  - name: "Claude Code"
+    slug: "claude-code"
+    description: "Claude Code AI coding assistant with Claude Code Router for request routing"
+    requiredIntegrations:
+      - "anthropic"
+      - "github"
+      - "figma"
+    dockerFile: |
+      # ANTHROPIC_API_KEY
+      # FIGMA_API_KEY
+      # GITHUB_TOKEN
+
+      # -----------------------------------------------------------------------------
+      # Base Image
+      # -----------------------------------------------------------------------------
+      # Using Node 20 on Debian Bookworm for E2B compatibility
+      # E2B only supports Debian-based images (Debian, Ubuntu, or e2bdev images)
+      FROM node:20-bookworm
+
+      # -----------------------------------------------------------------------------
+      # System Dependencies
+      # -----------------------------------------------------------------------------
+      # Install essential tools and Playwright dependencies
+      RUN apt-get update && apt-get install -y --no-install-recommends \
+          git \
+          curl \
+          wget \
+          ca-certificates \
+          build-essential \
+          python3 \
+          tmux \
+          && rm -rf /var/lib/apt/lists/*
+
+      # Install GitHub CLI
+      RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && apt-get update \
+          && apt-get install -y gh \
+          && rm -rf /var/lib/apt/lists/*
+
+      # -----------------------------------------------------------------------------
+      # Node Package Manager Setup
+      # -----------------------------------------------------------------------------
+      # Enable corepack for pnpm support
+      RUN corepack enable && corepack prepare pnpm@latest --activate
+
+      # Update npm to latest
+      RUN npm install -g npm@latest
+
+      # -----------------------------------------------------------------------------
+      # Global npm Packages
+      # -----------------------------------------------------------------------------
+      # Install Claude Code CLI
+      RUN npm install -g @anthropic-ai/claude-code
+
+      # Install Claude Code Router for request routing
+      RUN npm install -g @musistudio/claude-code-router
+
+      # Install MCP servers globally
+      RUN npm install -g figma-developer-mcp @playwright/mcp
+
+      # Install WeTTY for web-based terminal access
+      RUN npm install -g wetty
+
+      # Install Playwright library
+      RUN npx -y playwright install --with-deps
+
+      # -----------------------------------------------------------------------------
+      # Playwright Browser Installation
+      # -----------------------------------------------------------------------------
+      # Install Chromium with all dependencies
+      # Only installing Chromium to reduce image size (~400MB vs ~1.5GB for all browsers)
+      RUN npx playwright install --with-deps chromium
+
+      # -----------------------------------------------------------------------------
+      # Working Directory and User Setup
+      # -----------------------------------------------------------------------------
+      # Create user home directory structure
+      RUN mkdir -p /home/user && chown -R node:node /home/user
+
+      # Create Claude Code Router configuration directory
+      RUN mkdir -p /home/user/.claude-code-router && chown -R node:node /home/user/.claude-code-router
+
+      # Create workspace directory
+      RUN mkdir -p /home/user/workspace && chown -R node:node /home/user/workspace
+
+      # Set working directory
+      WORKDIR /home/user/workspace
+
+      # -----------------------------------------------------------------------------
+      # Environment Defaults
+      # -----------------------------------------------------------------------------
+      # Set sensible defaults (can be overridden at runtime)
+      ENV NODE_ENV=development
+      ENV CLAUDE_ROUTER_PORT=3456
+      ENV HOME=/home/user
+      ENV PATH="/home/user/.local/bin:${PATH}"
+
+      # -----------------------------------------------------------------------------
+      # Entrypoint Script (embedded via heredoc)
+      # -----------------------------------------------------------------------------
+      # Using quoted heredoc ('EOF') so variables are NOT expanded at build time
+      # They remain as literals and expand at runtime when the script executes
+      RUN cat > /usr/local/bin/entrypoint.sh << 'EOF'
+      #!/bin/bash
+      set -e
+
+      echo "=== E2B Coding Agent Startup ==="
+
+      # Create Claude Code Router config with runtime API keys
+      mkdir -p ~/.claude-code-router
+
+      cat > ~/.claude-code-router/config.json << CONFIGEOF
+      {
+        "LOG": true,
+        "NON_INTERACTIVE_MODE": true,
+        "API_TIMEOUT_MS": 600000,
+        "Providers": [
+          {
+            "name": "anthropic",
+            "api_base_url": "https://api.anthropic.com/v1/messages",
+            "api_key": "${ANTHROPIC_API_KEY}",
+            "models": ["claude-opus-4-5-20251101"],
+            "transformer": { "use": ["Anthropic"] }
+          }
+        ],
+        "Router": {
+          "default": "anthropic,claude-opus-4-5-20251101",
+          "think": "anthropic,claude-opus-4-5-20251101"
+        }
+      }
+      CONFIGEOF
+
+      # Create MCP configuration for Figma and Playwright
+      cat > ~/.mcp.json << MCPEOF
+      {
+        "mcpServers": {
+          "figma": {
+            "command": "npx",
+            "args": ["-y", "figma-developer-mcp", "--stdio"],
+            "env": {
+              "FIGMA_API_KEY": "${FIGMA_API_KEY}"
+            }
+          },
+          "playwright": {
+            "command": "npx",
+            "args": ["-y", "@playwright/mcp"]
+          }
+        }
+      }
+      MCPEOF
+
+      echo "MCP config created at ~/.mcp.json"
+
+      # Configure Claude Code to use the router
+      export ANTHROPIC_BASE_URL="http://127.0.0.1:${CLAUDE_ROUTER_PORT}"
+
+      # Write environment to file for tmux session to source
+      cat > ~/.agent-env << ENVEOF
+      export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
+      export ANTHROPIC_BASE_URL="http://127.0.0.1:${CLAUDE_ROUTER_PORT}"
+      export FIGMA_API_KEY="${FIGMA_API_KEY}"
+      export GITHUB_TOKEN="${GITHUB_TOKEN}"
+      export CLAUDE_ROUTER_PORT="${CLAUDE_ROUTER_PORT:-3456}"
+      ENVEOF
+
+      # Configure git to use GITHUB_TOKEN for authentication via gh CLI
+      if [ -n "${GITHUB_TOKEN}" ]; then
+        
+        # Configure git to use gh as credential helper
+        gh auth setup-git
+        
+        # Set git user identity for commits
+        git config --global user.email "agent@menagerie.local"
+        git config --global user.name "Menagerie Agent"
+        
+        echo "Git/GitHub CLI configured with GITHUB_TOKEN authentication"
+      fi
+
+      echo "Starting Claude Code in tmux session 'agent'..."
+
+      # Create tmux session 'agent' and run ccr code inside i, 
+      # The session sources the env file to get runtime variables
+      tmux new-session -d -s agent "source ~/.agent-env && ccr code"
+
+      echo "Claude Code running in tmux session 'agent'"
+      echo "Attach with: tmux attach -t agent"
+
+      echo "Starting WeTTY web terminal on port 3000..."
+      # WeTTY provides web terminal access to the tmux session
+      # --command attaches to the 'agent' tmux session
+      # --base "/" sets the base path to root
+      wetty --port 3000 --host 0.0.0.0 --command "tmux attach -t agent" --base "/" &
+
+      echo "WeTTY running at http://localhost:3000"
+
+      # Keep container alive
+      tail -f /dev/null
+      EOF
+
+      RUN chmod +x /usr/local/bin/entrypoint.sh
+
+      # Run entrypoint at startup (has access to runtime env vars from Sandbox.create)
+      CMD ["/usr/local/bin/entrypoint.sh"]
+
