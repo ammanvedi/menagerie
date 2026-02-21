@@ -3,6 +3,39 @@ set -e
 
 echo "=== E2B Coding Agent Startup ==="
 
+# -----------------------------------------------------------------------------
+# SSH Server
+# -----------------------------------------------------------------------------
+# Start SSH daemon for remote access (VS Code/Cursor Remote-SSH)
+/usr/sbin/sshd
+echo "SSH server running on port 22"
+
+# -----------------------------------------------------------------------------
+# Virtual Display Services (for Playwright browser streaming)
+# -----------------------------------------------------------------------------
+echo "Starting virtual display services..."
+
+# Start Xvfb (virtual framebuffer) on display :99
+Xvfb :99 -screen 0 1920x1080x24 &
+export DISPLAY=:99
+
+# Wait for Xvfb to start
+sleep 1
+
+# Start fluxbox window manager
+fluxbox &
+
+# Start x11vnc (VNC server reading from Xvfb)
+x11vnc -display :99 -forever -shared -nopw -rfbport 5900 &
+
+# Start noVNC (web-based VNC via websockify)
+websockify --web /usr/share/novnc 6080 localhost:5900 &
+
+echo "noVNC running at http://localhost:6080/vnc.html"
+
+# -----------------------------------------------------------------------------
+# Configuration Files
+# -----------------------------------------------------------------------------
 # Create Claude Code Router config with runtime API keys
 mkdir -p ~/.claude-code-router
 
@@ -40,7 +73,7 @@ cat > ~/.mcp.json << MCPEOF
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp"]
+      "args": ["-y", "@playwright/mcp", "--browser", "chromium"]
     }
   }
 }
@@ -59,6 +92,7 @@ export FIGMA_API_KEY="${FIGMA_API_KEY}"
 export GITHUB_TOKEN="${GITHUB_TOKEN}"
 export CLAUDE_ROUTER_PORT="${CLAUDE_ROUTER_PORT:-3456}"
 export TERM=xterm-256color
+export DISPLAY=:99
 ENVEOF
 
 # Configure git to use GITHUB_TOKEN for authentication via gh CLI
@@ -76,9 +110,12 @@ fi
 
 echo "Starting Claude Code in tmux session 'agent'..."
 
-# Create tmux session 'agent' and run ccr code inside i, 
+# Create tmux session 'agent' and run ccr code inside it
 # The session sources the env file to get runtime variables
 tmux new-session -d -s agent "source ~/.agent-env && ccr code"
+
+# Enable mouse mode for scrolling and selection
+tmux set -g mouse on
 
 echo "Claude Code running in tmux session 'agent'"
 echo "Attach with: tmux attach -t agent"
